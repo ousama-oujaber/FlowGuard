@@ -18,6 +18,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -45,6 +46,12 @@ class MessageControllerTest {
 
     @MockBean
     private com.flowguard.core.application.port.in.ManualRetryUseCase manualRetryUseCase;
+
+    @MockBean
+    private com.flowguard.core.application.port.in.SearchMessagesUseCase searchMessagesUseCase;
+
+    @MockBean
+    private com.flowguard.core.application.port.in.GetAttemptsUseCase getAttemptsUseCase;
 
     @Test
     @DisplayName("Valid submission returns 202 Accepted with Location header and envelope")
@@ -255,5 +262,89 @@ class MessageControllerTest {
                         .content(body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/messages performs scoped search with pagination and returns 200 OK")
+    void searchMessagesReturns200() throws Exception {
+        IntegrationMessage message = IntegrationMessage.accept(
+                new ClientId("client_payroll"),
+                new MessageType("PAYROLL_V1"),
+                "HR_PORTAL",
+                new DestinationKey("LEDGER_MAIN"),
+                new CorrelationId("corr-123"),
+                "EXT-01",
+                "{\"amount\":100}",
+                262144,
+                5
+        );
+
+        when(searchMessagesUseCase.search(any())).thenReturn(
+                new com.flowguard.core.application.port.in.SearchMessagesUseCase.SearchResult(
+                        List.of(message),
+                        0,
+                        20,
+                        1L,
+                        1
+                )
+        );
+
+        mockMvc.perform(get("/api/v1/messages")
+                        .header("X-Client-Id", "client_payroll")
+                        .param("status", "QUEUED")
+                        .param("page", "0")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.totalPages").value(1))
+                .andExpect(jsonPath("$.items[0].messageType").value("PAYROLL_V1"));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/messages/{id}/attempts returns attempt history ordered")
+    void getAttemptsReturns200() throws Exception {
+        UUID messageId = UUID.randomUUID();
+        com.flowguard.core.domain.model.ProcessingAttempt attempt =
+                com.flowguard.core.domain.model.ProcessingAttempt.start(
+                        new MessageId(messageId), 1, "worker-1", "trace-abc"
+                );
+        attempt.completeSuccess(200);
+
+        when(getAttemptsUseCase.getAttempts(any(), any())).thenReturn(List.of(attempt));
+
+        mockMvc.perform(get("/api/v1/messages/" + messageId + "/attempts")
+                        .header("X-Client-Id", "client_payroll"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].attemptNumber").value(1))
+                .andExpect(jsonPath("$[0].status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$[0].workerId").value("worker-1"))
+                .andExpect(jsonPath("$[0].targetStatusCode").value(200));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/messages/{id} includes payload when caller has messages:payload:read scope")
+    void getMessageIncludesPayloadWhenAuthorized() throws Exception {
+        UUID messageId = UUID.randomUUID();
+        IntegrationMessage message = IntegrationMessage.accept(
+                new ClientId("client_payroll"),
+                new MessageType("PAYROLL_V1"),
+                "HR_PORTAL",
+                new DestinationKey("LEDGER_MAIN"),
+                new CorrelationId("corr-123"),
+                "EXT-01",
+                "{\"amount\":100}",
+                262144,
+                5
+        );
+
+        when(getMessageUseCase.getMessage(any(), any())).thenReturn(Optional.of(message));
+
+        mockMvc.perform(get("/api/v1/messages/" + messageId)
+                        .header("X-Client-Id", "client_payroll")
+                        .header("X-Scope", "messages:payload:read"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.payload.amount").value(100));
     }
 }
