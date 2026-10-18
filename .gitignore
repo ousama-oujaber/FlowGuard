@@ -39,3 +39,7 @@ target/
 ### OS ###
 .DS_Store
 Thumbs.db
+
+### Local AI Agent Skills ###
+.agents/
+.agent/
