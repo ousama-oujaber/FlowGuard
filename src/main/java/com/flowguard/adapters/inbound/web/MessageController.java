@@ -26,6 +26,7 @@ import java.util.UUID;
 public class MessageController {
 
     private final SubmitMessageUseCase submitMessageUseCase;
+    private final BulkSubmitMessageUseCase bulkSubmitMessageUseCase;
     private final GetMessageUseCase getMessageUseCase;
     private final SearchMessagesUseCase searchMessagesUseCase;
     private final GetAttemptsUseCase getAttemptsUseCase;
@@ -35,6 +36,7 @@ public class MessageController {
 
     public MessageController(
             SubmitMessageUseCase submitMessageUseCase,
+            BulkSubmitMessageUseCase bulkSubmitMessageUseCase,
             GetMessageUseCase getMessageUseCase,
             SearchMessagesUseCase searchMessagesUseCase,
             GetAttemptsUseCase getAttemptsUseCase,
@@ -43,6 +45,7 @@ public class MessageController {
             ObjectMapper objectMapper
     ) {
         this.submitMessageUseCase = submitMessageUseCase;
+        this.bulkSubmitMessageUseCase = bulkSubmitMessageUseCase;
         this.getMessageUseCase = getMessageUseCase;
         this.searchMessagesUseCase = searchMessagesUseCase;
         this.getAttemptsUseCase = getAttemptsUseCase;
@@ -91,6 +94,66 @@ public class MessageController {
         return ResponseEntity.status(status)
                 .location(location)
                 .body(response);
+    }
+
+    @PostMapping(value = "/batch", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<BulkSubmitResponse> submitBatch(
+            @RequestHeader(value = "X-Correlation-ID", required = false) String batchCorrelationIdHeader,
+            @RequestHeader(value = "X-Client-Id", required = false, defaultValue = "client_default") String clientIdHeader,
+            @Valid @RequestBody BulkSubmitRequest request
+    ) {
+        ClientId clientId = new ClientId(clientIdHeader);
+        CorrelationId fallbackCorrelationId = batchCorrelationIdHeader != null && !batchCorrelationIdHeader.isBlank()
+                ? new CorrelationId(batchCorrelationIdHeader)
+                : null;
+
+        List<SubmitCommand> commands = request.items().stream()
+                .map(item -> {
+                    String payloadJson = serializePayload(item.payload());
+                    CorrelationId itemCorr = item.correlationId() != null && !item.correlationId().isBlank()
+                            ? new CorrelationId(item.correlationId())
+                            : (fallbackCorrelationId != null ? fallbackCorrelationId : CorrelationId.generate());
+
+                    return new SubmitCommand(
+                            clientId,
+                            new MessageType(item.messageType()),
+                            item.sourceSystem(),
+                            new DestinationKey(item.destinationKey()),
+                            itemCorr,
+                            item.externalReference(),
+                            payloadJson,
+                            new IdempotencyKey(item.idempotencyKey())
+                    );
+                })
+                .toList();
+
+        BulkSubmitMessageUseCase.BulkSubmitResult result =
+                bulkSubmitMessageUseCase.submitBatch(new BulkSubmitMessageUseCase.BulkSubmitCommand(clientId, commands));
+
+        List<BulkSubmitItemResponse> itemResponses = result.items().stream()
+                .map(itemOutcome -> new BulkSubmitItemResponse(
+                        itemOutcome.index(),
+                        itemOutcome.idempotencyKey(),
+                        itemOutcome.result().messageId().value(),
+                        itemOutcome.result().status().name(),
+                        itemOutcome.result().correlationId().value(),
+                        itemOutcome.result().acceptedAt(),
+                        itemOutcome.result().idempotentReplay()
+                ))
+                .toList();
+
+        BulkSubmitResponse response = new BulkSubmitResponse(
+                result.totalCount(),
+                result.acceptedCount(),
+                result.replayedCount(),
+                itemResponses
+        );
+
+        HttpStatus status = (result.replayedCount() == result.totalCount())
+                ? HttpStatus.OK
+                : HttpStatus.ACCEPTED;
+
+        return ResponseEntity.status(status).body(response);
     }
 
     @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
