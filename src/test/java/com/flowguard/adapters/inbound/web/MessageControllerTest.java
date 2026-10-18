@@ -2,6 +2,7 @@ package com.flowguard.adapters.inbound.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flowguard.adapters.inbound.web.dto.SubmitMessageRequest;
+import com.flowguard.core.application.port.in.BulkSubmitMessageUseCase;
 import com.flowguard.core.application.port.in.GetMessageUseCase;
 import com.flowguard.core.application.port.in.SubmitMessageUseCase;
 import com.flowguard.core.application.port.in.SubmitMessageUseCase.SubmitResult;
@@ -41,6 +42,9 @@ class MessageControllerTest {
 
     @MockBean
     private SubmitMessageUseCase submitMessageUseCase;
+
+    @MockBean
+    private BulkSubmitMessageUseCase bulkSubmitMessageUseCase;
 
     @MockBean
     private GetMessageUseCase getMessageUseCase;
@@ -376,4 +380,139 @@ class MessageControllerTest {
                 .andExpect(jsonPath("$.status").value("CANCELLED"))
                 .andExpect(jsonPath("$.auditEventId").value(auditId.toString()));
     }
+
+    @Test
+    @DisplayName("POST /api/v1/messages/batch returns 202 Accepted when batch contains newly accepted messages")
+    void submitBatchReturns202() throws Exception {
+        UUID msgId = UUID.randomUUID();
+        SubmitResult subResult = new SubmitResult(
+                new MessageId(msgId),
+                MessageStatus.QUEUED,
+                new CorrelationId("corr-batch-1"),
+                Instant.now(),
+                false
+        );
+
+        BulkSubmitMessageUseCase.BulkItemOutcome outcome =
+                new BulkSubmitMessageUseCase.BulkItemOutcome(0, "key-batch-1", subResult);
+
+        BulkSubmitMessageUseCase.BulkSubmitResult batchResult =
+                new BulkSubmitMessageUseCase.BulkSubmitResult(1, 1, 0, List.of(outcome));
+
+        when(bulkSubmitMessageUseCase.submitBatch(any())).thenReturn(batchResult);
+
+        String json = """
+                {
+                  "items": [
+                    {
+                      "idempotencyKey": "key-batch-1",
+                      "messageType": "ORDER_CREATED",
+                      "destinationKey": "crm_orders",
+                      "sourceSystem": "web",
+                      "correlationId": "corr-batch-1",
+                      "payload": { "id": 101 }
+                    }
+                  ]
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/messages/batch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Client-Id", "client_acme")
+                        .content(json))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.totalCount").value(1))
+                .andExpect(jsonPath("$.acceptedCount").value(1))
+                .andExpect(jsonPath("$.replayedCount").value(0))
+                .andExpect(jsonPath("$.items[0].idempotencyKey").value("key-batch-1"))
+                .andExpect(jsonPath("$.items[0].messageId").value(msgId.toString()))
+                .andExpect(jsonPath("$.items[0].status").value("QUEUED"))
+                .andExpect(jsonPath("$.items[0].idempotentReplay").value(false));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/messages/batch returns 200 OK when all items are idempotent replays")
+    void submitBatchAllReplaysReturns200() throws Exception {
+        UUID msgId = UUID.randomUUID();
+        SubmitResult subResult = new SubmitResult(
+                new MessageId(msgId),
+                MessageStatus.QUEUED,
+                new CorrelationId("corr-batch-2"),
+                Instant.now(),
+                true
+        );
+
+        BulkSubmitMessageUseCase.BulkItemOutcome outcome =
+                new BulkSubmitMessageUseCase.BulkItemOutcome(0, "key-batch-2", subResult);
+
+        BulkSubmitMessageUseCase.BulkSubmitResult batchResult =
+                new BulkSubmitMessageUseCase.BulkSubmitResult(1, 0, 1, List.of(outcome));
+
+        when(bulkSubmitMessageUseCase.submitBatch(any())).thenReturn(batchResult);
+
+        String json = """
+                {
+                  "items": [
+                    {
+                      "idempotencyKey": "key-batch-2",
+                      "messageType": "ORDER_CREATED",
+                      "destinationKey": "crm_orders",
+                      "payload": { "id": 102 }
+                    }
+                  ]
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/messages/batch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Client-Id", "client_acme")
+                        .content(json))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalCount").value(1))
+                .andExpect(jsonPath("$.acceptedCount").value(0))
+                .andExpect(jsonPath("$.replayedCount").value(1))
+                .andExpect(jsonPath("$.items[0].idempotentReplay").value(true));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/messages/batch rejects empty batch payload with 400 Bad Request")
+    void submitBatchEmptyRejected() throws Exception {
+        String json = """
+                {
+                  "items": []
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/messages/batch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Client-Id", "client_acme")
+                        .content(json))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.type").value("https://flowguard.io/errors/validation-failed"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/messages/batch rejects raw URL destination with 400 Bad Request (SSRF Defense)")
+    void submitBatchSsrfRejected() throws Exception {
+        String json = """
+                {
+                  "items": [
+                    {
+                      "idempotencyKey": "key-ssrf",
+                      "messageType": "ORDER_CREATED",
+                      "destinationKey": "https://evil.internal/api",
+                      "payload": { "test": "ssrf" }
+                    }
+                  ]
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/messages/batch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Client-Id", "client_acme")
+                        .content(json))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.type").value("https://flowguard.io/errors/invalid-destination"));
+    }
 }
+
