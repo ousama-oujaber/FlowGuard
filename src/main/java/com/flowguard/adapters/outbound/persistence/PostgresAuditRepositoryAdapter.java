@@ -71,6 +71,52 @@ public class PostgresAuditRepositoryAdapter implements AuditRepositoryPort {
         );
     }
 
+    @Override
+    public AuditSearchResult search(AuditSearchCriteria criteria) {
+        StringBuilder whereClause = new StringBuilder(" WHERE 1=1 ");
+        MapSqlParameterSource params = new MapSqlParameterSource();
+
+        if (criteria.messageId() != null) {
+            whereClause.append(" AND message_id = :messageId ");
+            params.addValue("messageId", criteria.messageId().value());
+        }
+        if (criteria.actorId() != null && !criteria.actorId().isBlank()) {
+            whereClause.append(" AND actor_id = :actorId ");
+            params.addValue("actorId", criteria.actorId().trim());
+        }
+        if (criteria.action() != null && !criteria.action().isBlank()) {
+            whereClause.append(" AND action = :action ");
+            params.addValue("action", criteria.action().trim());
+        }
+        if (criteria.from() != null) {
+            whereClause.append(" AND created_at >= :fromTime ");
+            params.addValue("fromTime", Timestamp.from(criteria.from()));
+        }
+        if (criteria.to() != null) {
+            whereClause.append(" AND created_at <= :toTime ");
+            params.addValue("toTime", Timestamp.from(criteria.to()));
+        }
+
+        String countSql = "SELECT COUNT(*) FROM audit_event " + whereClause;
+        Long total = jdbcTemplate.queryForObject(countSql, params, Long.class);
+        long totalElements = total != null ? total : 0L;
+
+        int limit = criteria.size();
+        int offset = criteria.page() * limit;
+
+        params.addValue("limit", limit);
+        params.addValue("offset", offset);
+
+        String selectSql = "SELECT * FROM audit_event " + whereClause + " ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset";
+        List<AuditEvent> events = jdbcTemplate.query(
+                selectSql,
+                params,
+                new AuditEventRowMapper(objectMapper)
+        );
+
+        return new AuditSearchResult(events, totalElements, criteria.page(), limit);
+    }
+
     private static class AuditEventRowMapper implements RowMapper<AuditEvent> {
         private final ObjectMapper objectMapper;
 

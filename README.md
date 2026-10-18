@@ -134,11 +134,64 @@ curl "http://localhost:8080/api/v1/operations/summary" \
   -H "X-Scope: operations:read"
 ```
 
+### 7. Bulk Message Ingestion (Batch Submission)
+```bash
+curl -i -X POST http://localhost:8080/api/v1/messages/batch \
+  -H "Content-Type: application/json" \
+  -H "X-Client-Id: client_acme_corp" \
+  -d '{
+    "items": [
+      {
+        "idempotencyKey": "batch-item-001",
+        "messageType": "ORDER_SYNC",
+        "destinationKey": "LEDGER_MAIN",
+        "payload": {"orderId": "ORD-101", "amount": 150.00}
+      },
+      {
+        "idempotencyKey": "batch-item-002",
+        "messageType": "ORDER_SYNC",
+        "destinationKey": "LEDGER_MAIN",
+        "payload": {"orderId": "ORD-102", "amount": 250.00}
+      }
+    ]
+  }'
+```
+**Response:** `202 Accepted` (or `200 OK` if all items are idempotent replays)
+```json
+{
+  "totalCount": 2,
+  "acceptedCount": 2,
+  "replayedCount": 0,
+  "items": [
+    {
+      "index": 0,
+      "idempotencyKey": "batch-item-001",
+      "messageId": "9a0a8112-2591-4965-9831-2792c306d8a2",
+      "status": "QUEUED",
+      "idempotentReplay": false
+    },
+    {
+      "index": 1,
+      "idempotencyKey": "batch-item-002",
+      "messageId": "1b0a8234-3191-4965-9831-2792c306d8b3",
+      "status": "QUEUED",
+      "idempotentReplay": false
+    }
+  ]
+}
+```
+
+### 8. Search & Export Audit Events
+```bash
+curl "http://localhost:8080/api/v1/audit-events?action=MANUAL_RETRY&page=0&size=20" \
+  -H "X-Scope: audit:read"
+```
+
 ---
 
 ## 🧪 Automated Testing & Verification
 
-Execute the complete test suite (unit tests, integration tests, and ArchUnit architecture verification rules):
+Execute the complete test suite (117 automated unit tests, integration tests, and ArchUnit architecture verification rules):
 ```bash
 ./mvnw clean test
 ```
