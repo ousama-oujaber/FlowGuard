@@ -100,7 +100,30 @@ public class SubmitMessageService implements SubmitMessageUseCase {
                 now,
                 now.plus(idempotencyRetention)
         );
-        idempotencyRepository.save(newEntry);
+        boolean saved = idempotencyRepository.save(newEntry);
+        if (!saved) {
+            // Concurrent submission conflict: Another thread won the insertion race on (clientId, keyDigest).
+            // Clean up orphan message created in this concurrent attempt:
+            messageRepository.delete(message.getId());
+
+            // Load and compare the winning record
+            IdempotencyEntry winningEntry = idempotencyRepository.find(command.clientId(), keyDigest)
+                    .orElseThrow(() -> new DomainException("Idempotency conflict detected but winning record not found"));
+
+            // Verifies fingerprint match; throws IdempotencyConflictException (409) if altered
+            IdempotencyPolicy.verify(winningEntry.requestFingerprint(), incomingFingerprint);
+
+            IntegrationMessage winningMessage = messageRepository.findById(winningEntry.messageId())
+                    .orElseThrow(() -> new DomainException("Winning idempotent message not found: " + winningEntry.messageId()));
+
+            return new SubmitResult(
+                    winningMessage.getId(),
+                    winningMessage.getStatus(),
+                    winningMessage.getCorrelationId(),
+                    winningEntry.createdAt(),
+                    true // idempotent replay
+            );
+        }
 
         return new SubmitResult(
                 message.getId(),

@@ -21,6 +21,27 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    @ExceptionHandler(MessageNotFoundException.class)
+    public ResponseEntity<ProblemDetailsResponse> handleMessageNotFound(
+            MessageNotFoundException ex,
+            HttpServletRequest request
+    ) {
+        String correlationId = extractCorrelationId(request);
+        log.warn("Message not found for path [{}]: {}", request.getRequestURI(), ex.getMessage());
+
+        ProblemDetailsResponse problem = ProblemDetailsResponse.of(
+                "MESSAGE_NOT_FOUND",
+                "Message Not Found",
+                HttpStatus.NOT_FOUND.value(),
+                ex.getMessage(),
+                request.getRequestURI(),
+                correlationId
+        );
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problem);
+    }
+
     @ExceptionHandler(IdempotencyConflictException.class)
     public ResponseEntity<ProblemDetailsResponse> handleIdempotencyConflict(
             IdempotencyConflictException ex,

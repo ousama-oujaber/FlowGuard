@@ -16,6 +16,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.flowguard.core.application.port.in.ManualRetryUseCase;
+import com.flowguard.adapters.inbound.web.dto.*;
 
 import java.net.URI;
 import java.util.UUID;
@@ -26,15 +28,18 @@ public class MessageController {
 
     private final SubmitMessageUseCase submitMessageUseCase;
     private final GetMessageUseCase getMessageUseCase;
+    private final ManualRetryUseCase manualRetryUseCase;
     private final ObjectMapper objectMapper;
 
     public MessageController(
             SubmitMessageUseCase submitMessageUseCase,
             GetMessageUseCase getMessageUseCase,
+            ManualRetryUseCase manualRetryUseCase,
             ObjectMapper objectMapper
     ) {
         this.submitMessageUseCase = submitMessageUseCase;
         this.getMessageUseCase = getMessageUseCase;
+        this.manualRetryUseCase = manualRetryUseCase;
         this.objectMapper = objectMapper;
     }
 
@@ -89,6 +94,32 @@ public class MessageController {
                 .map(MessageDetailsResponse::fromDomain)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @PostMapping(value = "/{id}/retries", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ManualRetryResponse> retryMessage(
+            @PathVariable("id") UUID id,
+            @RequestHeader(value = "X-Actor-Id", required = false, defaultValue = "operator-system") String actorIdHeader,
+            @Valid @RequestBody ManualRetryRequest request
+    ) {
+        ManualRetryUseCase.RetryCommand command =
+                new ManualRetryUseCase.RetryCommand(
+                        new MessageId(id),
+                        actorIdHeader,
+                        request.reason()
+                );
+
+        ManualRetryUseCase.RetryResult result = manualRetryUseCase.retry(command);
+
+        com.flowguard.adapters.inbound.web.dto.ManualRetryResponse response =
+                new com.flowguard.adapters.inbound.web.dto.ManualRetryResponse(
+                        result.messageId().value(),
+                        result.status().name(),
+                        result.auditEventId(),
+                        result.message()
+                );
+
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
     }
 
     private String serializePayload(Object payload) {
