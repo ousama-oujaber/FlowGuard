@@ -116,7 +116,19 @@ curl -i -X POST "http://localhost:8080/api/v1/messages/9a0a8112-2591-4965-9831-2
 ```
 **Response:** `202 Accepted`
 
-### 5. Query Operational Summary
+### 5. Explicit Message Cancellation (Prior to Dispatch)
+```bash
+curl -i -X POST "http://localhost:8080/api/v1/messages/9a0a8112-2591-4965-9831-2792c306d8a2/cancel" \
+  -H "Content-Type: application/json" \
+  -H "X-Actor-Id: ops-engineer-42" \
+  -H "X-Client-Id: client_acme_corp" \
+  -d '{
+    "reason": "Order cancelled by customer before dispatch."
+  }'
+```
+**Response:** `202 Accepted`
+
+### 6. Query Operational Summary
 ```bash
 curl "http://localhost:8080/api/v1/operations/summary" \
   -H "X-Scope: operations:read"

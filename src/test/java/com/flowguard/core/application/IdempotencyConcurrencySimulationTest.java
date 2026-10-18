@@ -99,6 +99,11 @@ class IdempotencyConcurrencySimulationTest {
             public Optional<IdempotencyEntry> find(ClientId clientId, String keyDigest) {
                 return Optional.ofNullable(idempotencyStore.get(clientId.value() + ":" + keyDigest));
             }
+
+            @Override
+            public int deleteExpiredBefore(Instant cutoff) {
+                return 0;
+            }
         };
 
         SubmitMessageService service = new SubmitMessageService(mockMessageRepo, mockIdempRepo, 262144, 5, 7);

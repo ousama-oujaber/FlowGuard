@@ -30,6 +30,7 @@ public class MessageController {
     private final SearchMessagesUseCase searchMessagesUseCase;
     private final GetAttemptsUseCase getAttemptsUseCase;
     private final ManualRetryUseCase manualRetryUseCase;
+    private final CancelMessageUseCase cancelMessageUseCase;
     private final ObjectMapper objectMapper;
 
     public MessageController(
@@ -38,6 +39,7 @@ public class MessageController {
             SearchMessagesUseCase searchMessagesUseCase,
             GetAttemptsUseCase getAttemptsUseCase,
             ManualRetryUseCase manualRetryUseCase,
+            CancelMessageUseCase cancelMessageUseCase,
             ObjectMapper objectMapper
     ) {
         this.submitMessageUseCase = submitMessageUseCase;
@@ -45,6 +47,7 @@ public class MessageController {
         this.searchMessagesUseCase = searchMessagesUseCase;
         this.getAttemptsUseCase = getAttemptsUseCase;
         this.manualRetryUseCase = manualRetryUseCase;
+        this.cancelMessageUseCase = cancelMessageUseCase;
         this.objectMapper = objectMapper;
     }
 
@@ -181,6 +184,26 @@ public class MessageController {
         ManualRetryResponse response = new ManualRetryResponse(
                 result.messageId().value(),
                 result.status().name(),
+                result.auditEventId(),
+                result.message()
+        );
+
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
+    }
+
+    @PostMapping(value = "/{id}/cancel", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<CancelMessageResponse> cancelMessage(
+            @PathVariable("id") UUID id,
+            @RequestHeader(value = "X-Actor-Id", required = false, defaultValue = "operator-system") String actorIdHeader,
+            @RequestHeader(value = "X-Client-Id", required = false, defaultValue = "client_default") String clientIdHeader,
+            @Valid @RequestBody CancelMessageRequest request
+    ) {
+        CancelMessageUseCase.CancelResult result =
+                cancelMessageUseCase.cancelMessage(id, actorIdHeader, request.reason(), clientIdHeader);
+
+        CancelMessageResponse response = new CancelMessageResponse(
+                result.messageId(),
+                result.status(),
                 result.auditEventId(),
                 result.message()
         );
