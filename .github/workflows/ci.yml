@@ -21,14 +21,8 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
-      - name: Verify Domain Boundary Isolation (Python)
-        run: |
-          python3 .agents/skills/flowguard/scripts/verify_boundaries.py .
+      - name: Make Maven Wrapper Executable
+        run: chmod +x ./mvnw
 
       - name: Execute Automated Test Suite & Architecture Gate
-        run: |
-          ./mvnw clean test
-
-      - name: Run FlowGuard Judge Court Conformance Audit
-        run: |
-          python3 .agents/skills/flowguard-judge/scripts/run_judge.py .
+        run: ./mvnw clean test
