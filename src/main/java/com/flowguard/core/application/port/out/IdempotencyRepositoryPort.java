@@ -17,7 +17,7 @@ public interface IdempotencyRepositoryPort {
             Instant expiresAt
     ) {}
 
-    void save(IdempotencyEntry entry);
+    boolean save(IdempotencyEntry entry);
 
     Optional<IdempotencyEntry> find(ClientId clientId, String keyDigest);
 }

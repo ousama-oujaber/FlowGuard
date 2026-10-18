@@ -43,6 +43,9 @@ class MessageControllerTest {
     @MockBean
     private GetMessageUseCase getMessageUseCase;
 
+    @MockBean
+    private com.flowguard.core.application.port.in.ManualRetryUseCase manualRetryUseCase;
+
     @Test
     @DisplayName("Valid submission returns 202 Accepted with Location header and envelope")
     void validSubmissionReturns202() throws Exception {
@@ -176,5 +179,81 @@ class MessageControllerTest {
         mockMvc.perform(get("/api/v1/messages/" + messageId)
                         .header("X-Client-Id", "client_payroll"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("POST retry returns 202 Accepted when message is eligible")
+    void retryEligibleMessageReturns202() throws Exception {
+        UUID messageId = UUID.randomUUID();
+        UUID auditId = UUID.randomUUID();
+
+        when(manualRetryUseCase.retry(any())).thenReturn(
+                new com.flowguard.core.application.port.in.ManualRetryUseCase.RetryResult(
+                        new MessageId(messageId),
+                        MessageStatus.QUEUED,
+                        auditId,
+                        "Manual retry requested successfully; message re-queued for processing."
+                )
+        );
+
+        String body = """
+            {
+              "reason": "Target configuration corrected and confirmed safe to retry."
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/messages/" + messageId + "/retries")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Actor-Id", "operator-ops-1")
+                        .content(body))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.messageId").value(messageId.toString()))
+                .andExpect(jsonPath("$.status").value("QUEUED"))
+                .andExpect(jsonPath("$.auditEventId").value(auditId.toString()));
+    }
+
+    @Test
+    @DisplayName("POST retry returns 409 Conflict when state transition is illegal")
+    void retryIneligibleMessageReturns409() throws Exception {
+        UUID messageId = UUID.randomUUID();
+
+        when(manualRetryUseCase.retry(any())).thenThrow(
+                new com.flowguard.core.domain.exception.InvalidStateTransitionException(
+                        "Cannot manually retry message in status [SUCCEEDED]. Only DEAD_LETTERED or RECONCILIATION_REQUIRED messages are eligible."
+                )
+        );
+
+        String body = """
+            {
+              "reason": "Retrying finished message."
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/messages/" + messageId + "/retries")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Actor-Id", "operator-ops-1")
+                        .content(body))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("INVALID_STATE_TRANSITION"))
+                .andExpect(jsonPath("$.status").value(409));
+    }
+
+    @Test
+    @DisplayName("POST retry returns 400 Bad Request when reason is missing or blank")
+    void retryMissingReasonReturns400() throws Exception {
+        UUID messageId = UUID.randomUUID();
+
+        String body = """
+            {
+              "reason": ""
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/messages/" + messageId + "/retries")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Actor-Id", "operator-ops-1")
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
     }
 }

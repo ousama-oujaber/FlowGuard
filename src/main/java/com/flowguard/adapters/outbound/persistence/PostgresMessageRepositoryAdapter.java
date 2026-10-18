@@ -207,6 +207,43 @@ public class PostgresMessageRepositoryAdapter implements MessageRepositoryPort {
         return count != null ? count : 0L;
     }
 
+    @Override
+    public void delete(MessageId id) {
+        String sql = "DELETE FROM integration_message WHERE id = :id";
+        jdbcTemplate.update(sql, new MapSqlParameterSource("id", id.value()));
+    }
+
+    @Override
+    public List<IntegrationMessage> findExpiredLeases(Instant cutoff, int batchSize) {
+        String selectSql = """
+            SELECT id FROM integration_message
+            WHERE status = 'PROCESSING'
+              AND lease_until <= :cutoff
+            ORDER BY lease_until ASC
+            LIMIT :batchSize
+            FOR UPDATE SKIP LOCKED
+            """;
+
+        List<UUID> ids = jdbcTemplate.queryForList(
+                selectSql,
+                new MapSqlParameterSource()
+                        .addValue("cutoff", Timestamp.from(cutoff))
+                        .addValue("batchSize", batchSize),
+                UUID.class
+        );
+
+        if (ids.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        String fetchSql = "SELECT * FROM integration_message WHERE id IN (:ids)";
+        return jdbcTemplate.query(
+                fetchSql,
+                new MapSqlParameterSource("ids", ids),
+                new IntegrationMessageRowMapper()
+        );
+    }
+
     private static class IntegrationMessageRowMapper implements RowMapper<IntegrationMessage> {
         @Override
         public IntegrationMessage mapRow(ResultSet rs, int rowNum) throws SQLException {

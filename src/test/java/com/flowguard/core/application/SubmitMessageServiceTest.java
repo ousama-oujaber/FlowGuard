@@ -52,6 +52,7 @@ class SubmitMessageServiceTest {
     @DisplayName("First-time submission atomically saves message and idempotency record and returns 202 Accepted result")
     void firstTimeSubmission() {
         when(idempotencyRepository.find(eq(clientId), anyString())).thenReturn(Optional.empty());
+        when(idempotencyRepository.save(any(IdempotencyEntry.class))).thenReturn(true);
 
         SubmitCommand command = new SubmitCommand(
                 clientId, messageType, "HR_PORTAL", destinationKey, correlationId, "EXT-01", payload, idempotencyKey
@@ -65,6 +66,69 @@ class SubmitMessageServiceTest {
 
         verify(messageRepository, times(1)).save(any(IntegrationMessage.class));
         verify(idempotencyRepository, times(1)).save(any(IdempotencyEntry.class));
+    }
+
+    @Test
+    @DisplayName("Concurrent insertion race conflict loads winning record and returns original message")
+    void concurrentInsertionRaceWinningReplay() {
+        // Insertion fails because other thread won the race
+        when(idempotencyRepository.save(any(IdempotencyEntry.class))).thenReturn(false);
+
+        PayloadFingerprint fp = PayloadFingerprint.compute(clientId, messageType, destinationKey, payload);
+        MessageId winningId = MessageId.generate();
+        Instant winningTime = Instant.now().minusSeconds(1);
+
+        IdempotencyEntry winningEntry = new IdempotencyEntry(
+                clientId, idempotencyKey.computeDigest(), fp, winningId, winningTime, winningTime.plusSeconds(86400)
+        );
+        IntegrationMessage winningMessage = IntegrationMessage.accept(
+                clientId, messageType, "HR_PORTAL", destinationKey, correlationId, "EXT-01", payload, 262144, 5
+        );
+
+        // When reloading winning entry after save conflict
+        when(idempotencyRepository.find(eq(clientId), anyString()))
+                .thenReturn(Optional.empty()) // first check
+                .thenReturn(Optional.of(winningEntry)); // reload after save conflict
+
+        when(messageRepository.findById(winningId)).thenReturn(Optional.of(winningMessage));
+
+        SubmitCommand command = new SubmitCommand(
+                clientId, messageType, "HR_PORTAL", destinationKey, correlationId, "EXT-01", payload, idempotencyKey
+        );
+
+        SubmitResult result = service.submit(command);
+
+        assertThat(result.messageId()).isEqualTo(winningMessage.getId());
+        assertThat(result.idempotentReplay()).isTrue();
+        verify(messageRepository, times(1)).delete(any(MessageId.class));
+    }
+
+    @Test
+    @DisplayName("Concurrent insertion race with altered payload rejects with IdempotencyConflictException")
+    void concurrentInsertionRaceAlteredPayloadConflict() {
+        when(idempotencyRepository.save(any(IdempotencyEntry.class))).thenReturn(false);
+
+        PayloadFingerprint winningFp = PayloadFingerprint.compute(clientId, messageType, destinationKey, "{\"other\":123}");
+        MessageId winningId = MessageId.generate();
+        Instant winningTime = Instant.now().minusSeconds(1);
+
+        IdempotencyEntry winningEntry = new IdempotencyEntry(
+                clientId, idempotencyKey.computeDigest(), winningFp, winningId, winningTime, winningTime.plusSeconds(86400)
+        );
+
+        when(idempotencyRepository.find(eq(clientId), anyString()))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winningEntry));
+
+        SubmitCommand command = new SubmitCommand(
+                clientId, messageType, "HR_PORTAL", destinationKey, correlationId, "EXT-01", payload, idempotencyKey
+        );
+
+        assertThatThrownBy(() -> service.submit(command))
+                .isInstanceOf(IdempotencyConflictException.class)
+                .hasMessageContaining("Idempotency key reuse conflict");
+
+        verify(messageRepository, times(1)).delete(any(MessageId.class));
     }
 
     @Test

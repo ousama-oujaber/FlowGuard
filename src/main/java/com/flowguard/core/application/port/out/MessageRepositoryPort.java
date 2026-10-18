@@ -22,4 +22,9 @@ public interface MessageRepositoryPort {
     boolean updateStatusWithLeaseFence(IntegrationMessage message, LeaseToken leaseToken);
 
     long countByStatus(MessageStatus status);
+
+    void delete(MessageId id);
+
+    List<IntegrationMessage> findExpiredLeases(Instant cutoff, int batchSize);
 }
+

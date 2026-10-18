@@ -37,7 +37,7 @@ public class PostgresIdempotencyRepositoryAdapter implements IdempotencyReposito
         """;
 
     @Override
-    public void save(IdempotencyEntry entry) {
+    public boolean save(IdempotencyEntry entry) {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("clientId", entry.clientId().value())
                 .addValue("keyDigest", entry.keyDigest())
@@ -46,7 +46,8 @@ public class PostgresIdempotencyRepositoryAdapter implements IdempotencyReposito
                 .addValue("createdAt", Timestamp.from(entry.createdAt()))
                 .addValue("expiresAt", Timestamp.from(entry.expiresAt()));
 
-        jdbcTemplate.update(INSERT_SQL, params);
+        int affected = jdbcTemplate.update(INSERT_SQL, params);
+        return affected > 0;
     }
 
     @Override
