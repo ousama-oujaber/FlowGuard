@@ -24,6 +24,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -52,6 +53,9 @@ class MessageControllerTest {
 
     @MockBean
     private com.flowguard.core.application.port.in.GetAttemptsUseCase getAttemptsUseCase;
+
+    @MockBean
+    private com.flowguard.core.application.port.in.CancelMessageUseCase cancelMessageUseCase;
 
     @Test
     @DisplayName("Valid submission returns 202 Accepted with Location header and envelope")
@@ -346,5 +350,30 @@ class MessageControllerTest {
                         .header("X-Scope", "messages:payload:read"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.payload.amount").value(100));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/messages/{id}/cancel cancels message before side effects start")
+    void cancelMessageReturns202() throws Exception {
+        UUID messageId = UUID.randomUUID();
+        UUID auditId = UUID.randomUUID();
+
+        when(cancelMessageUseCase.cancelMessage(eq(messageId), any(), eq("Duplicate submission"), any()))
+                .thenReturn(new com.flowguard.core.application.port.in.CancelMessageUseCase.CancelResult(
+                        messageId,
+                        com.flowguard.core.domain.model.MessageStatus.CANCELLED,
+                        auditId,
+                        "Message successfully cancelled before dispatch side-effects."
+                ));
+
+        mockMvc.perform(post("/api/v1/messages/" + messageId + "/cancel")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Actor-Id", "ops-user")
+                        .header("X-Client-Id", "client_acme")
+                        .content("{\"reason\": \"Duplicate submission\"}"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.messageId").value(messageId.toString()))
+                .andExpect(jsonPath("$.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.auditEventId").value(auditId.toString()));
     }
 }

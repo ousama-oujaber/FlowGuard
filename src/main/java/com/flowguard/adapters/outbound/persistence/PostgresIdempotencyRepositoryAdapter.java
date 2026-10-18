@@ -67,6 +67,12 @@ public class PostgresIdempotencyRepositoryAdapter implements IdempotencyReposito
         }
     }
 
+    @Override
+    public int deleteExpiredBefore(java.time.Instant cutoff) {
+        String sql = "DELETE FROM idempotency_record WHERE expires_at <= :cutoff";
+        return jdbcTemplate.update(sql, new MapSqlParameterSource("cutoff", Timestamp.from(cutoff)));
+    }
+
     private static class IdempotencyEntryRowMapper implements RowMapper<IdempotencyEntry> {
         @Override
         public IdempotencyEntry mapRow(ResultSet rs, int rowNum) throws SQLException {
