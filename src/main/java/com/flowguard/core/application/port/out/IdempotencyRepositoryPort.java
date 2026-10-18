@@ -20,4 +20,6 @@ public interface IdempotencyRepositoryPort {
     boolean save(IdempotencyEntry entry);
 
     Optional<IdempotencyEntry> find(ClientId clientId, String keyDigest);
+
+    int deleteExpiredBefore(Instant cutoff);
 }

@@ -257,6 +257,33 @@ public class IntegrationMessage {
         clearLease();
     }
 
+    /**
+     * Explicit message cancellation requested before a delivery side effect begins.
+     * Allowed only from QUEUED or RETRY_SCHEDULED status.
+     */
+    public void cancel(String actorId, String reason) {
+        if (actorId == null || actorId.isBlank()) {
+            throw new DomainException("actorId cannot be blank");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new DomainException("Cancellation reason cannot be blank");
+        }
+
+        if (this.status == MessageStatus.PROCESSING) {
+            throw new InvalidStateTransitionException(
+                    "Cannot cancel message [" + this.id + "]: Message is currently PROCESSING with in-flight worker dispatch."
+            );
+        }
+
+        MessageLifecyclePolicy.validateTransition(this.status, MessageStatus.CANCELLED);
+
+        this.status = MessageStatus.CANCELLED;
+        this.nextAttemptAt = null;
+        this.completedAt = Instant.now();
+        this.updatedAt = this.completedAt;
+        clearLease();
+    }
+
     private void validateLeaseOwnership(LeaseToken activeToken) {
         if (this.status != MessageStatus.PROCESSING) {
             throw new InvalidStateTransitionException("Cannot complete attempt: Message is not in PROCESSING state (current: " + this.status + ")");

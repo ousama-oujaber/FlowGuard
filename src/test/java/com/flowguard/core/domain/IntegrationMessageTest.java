@@ -166,6 +166,43 @@ class IntegrationMessageTest {
                 .hasMessageContaining("Only DEAD_LETTERED or RECONCILIATION_REQUIRED messages are eligible");
     }
 
+    @Test
+    @DisplayName("Cancelling a QUEUED message transitions status to CANCELLED and sets completedAt")
+    void cancelQueuedMessage() {
+        IntegrationMessage msg = createDefaultQueuedMessage();
+        msg.cancel("caller-alice", "Customer cancelled order");
+
+        assertThat(msg.getStatus()).isEqualTo(MessageStatus.CANCELLED);
+        assertThat(msg.getCompletedAt()).isNotNull();
+        assertThat(msg.getStatus().isTerminal()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Cancelling a RETRY_SCHEDULED message transitions status to CANCELLED")
+    void cancelRetryScheduledMessage() {
+        IntegrationMessage msg = createDefaultQueuedMessage();
+        LeaseToken token = LeaseToken.generate();
+        msg.claim("worker-01", token, Duration.ofMinutes(1));
+        msg.recordFailure(token, ErrorCategory.TRANSIENT_NETWORK, new FailureCode("FAIL"), new SafeErrorSummary("err"), RetryPolicy.defaultPolicy(), null);
+
+        assertThat(msg.getStatus()).isEqualTo(MessageStatus.RETRY_SCHEDULED);
+
+        msg.cancel("caller-alice", "No longer needed");
+        assertThat(msg.getStatus()).isEqualTo(MessageStatus.CANCELLED);
+    }
+
+    @Test
+    @DisplayName("Cancelling an in-flight PROCESSING message is forbidden")
+    void cancelProcessingMessageForbidden() {
+        IntegrationMessage msg = createDefaultQueuedMessage();
+        LeaseToken token = LeaseToken.generate();
+        msg.claim("worker-01", token, Duration.ofMinutes(1));
+
+        assertThatThrownBy(() -> msg.cancel("caller-alice", "Stop it"))
+                .isInstanceOf(InvalidStateTransitionException.class)
+                .hasMessageContaining("PROCESSING");
+    }
+
     private IntegrationMessage createDefaultQueuedMessage() {
         return IntegrationMessage.accept(
                 clientId, messageType, "ORDER_SERVICE", destinationKey, correlationId, "REF", payload, 262144, 3
