@@ -191,9 +191,24 @@ curl "http://localhost:8080/api/v1/audit-events?action=MANUAL_RETRY&page=0&size=
 
 ## 🧪 Automated Testing & Verification
 
-Execute the complete test suite (117 automated unit tests, integration tests, and ArchUnit architecture verification rules):
+Execute the complete test suite (124 automated unit tests, integration tests, E2E Testcontainers suite, and ArchUnit architecture verification rules):
 ```bash
 ./mvnw clean test
+```
+
+### End-to-End (E2E) Test Suite with Testcontainers
+FlowGuard includes a comprehensive E2E test suite ([`FlowGuardEnterpriseE2ETest`](file:///home/protocol/Desktop/FlowGuard/src/test/java/com/flowguard/e2e/FlowGuardEnterpriseE2ETest.java)) running against a live **PostgreSQL 16 Alpine container**:
+- **Phase 1 & 2:** Message submission (`202 Accepted`), idempotent replay (`200 OK`), payload conflict detection (`409 Conflict`), and SSRF raw URL rejection (`400 Bad Request`).
+- **Phase 3:** Deterministic worker claim with `SELECT ... FOR UPDATE SKIP LOCKED`, monotonic attempt tracking, and transition to `SUCCEEDED`.
+- **Phase 4:** Simulated ambiguous timeouts triggering `RECONCILIATION_REQUIRED` quarantine (prohibiting automatic retries).
+- **Phase 5:** Audited manual retry re-queueing to `QUEUED` with immutable audit log generation.
+- **Phase 8:** Explicit message cancellation prior to dispatch (`CANCELLED`).
+- **Phase 9:** Bulk message ingestion (`POST /api/v1/messages/batch`) and paged audit event querying (`GET /api/v1/audit-events`).
+- **Operations & Actuator:** Health and metrics inspection (`/actuator/health`, `/actuator/metrics`).
+
+To run only the E2E test suite:
+```bash
+./mvnw test -Dtest=FlowGuardEnterpriseE2ETest
 ```
 
 ### ArchUnit Architecture Verification
