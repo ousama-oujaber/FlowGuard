@@ -244,6 +244,69 @@ public class PostgresMessageRepositoryAdapter implements MessageRepositoryPort {
         );
     }
 
+    @Override
+    public com.flowguard.core.application.port.in.SearchMessagesUseCase.SearchResult search(
+            com.flowguard.core.application.port.in.SearchMessagesUseCase.SearchCriteria criteria
+    ) {
+        StringBuilder whereClause = new StringBuilder(" WHERE client_id = :clientId");
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("clientId", criteria.clientId().value());
+
+        if (criteria.status() != null) {
+            whereClause.append(" AND status = :status");
+            params.addValue("status", criteria.status().name());
+        }
+        if (criteria.messageType() != null) {
+            whereClause.append(" AND message_type = :messageType");
+            params.addValue("messageType", criteria.messageType().value());
+        }
+        if (criteria.destinationKey() != null) {
+            whereClause.append(" AND destination_key = :destinationKey");
+            params.addValue("destinationKey", criteria.destinationKey().value());
+        }
+        if (criteria.correlationId() != null) {
+            whereClause.append(" AND correlation_id = :correlationId");
+            params.addValue("correlationId", criteria.correlationId().value());
+        }
+        if (criteria.createdAfter() != null) {
+            whereClause.append(" AND created_at >= :createdAfter");
+            params.addValue("createdAfter", Timestamp.from(criteria.createdAfter()));
+        }
+        if (criteria.createdBefore() != null) {
+            whereClause.append(" AND created_at <= :createdBefore");
+            params.addValue("createdBefore", Timestamp.from(criteria.createdBefore()));
+        }
+
+        String countSql = "SELECT COUNT(*) FROM integration_message" + whereClause;
+        Long totalElements = jdbcTemplate.queryForObject(countSql, params, Long.class);
+        long total = totalElements != null ? totalElements : 0L;
+
+        int page = criteria.page();
+        int size = criteria.size();
+        int offset = page * size;
+        int totalPages = size > 0 ? (int) Math.ceil((double) total / size) : 0;
+
+        params.addValue("limit", size).addValue("offset", offset);
+        String dataSql = "SELECT * FROM integration_message" + whereClause +
+                " ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset";
+
+        List<IntegrationMessage> items = jdbcTemplate.query(dataSql, params, new IntegrationMessageRowMapper());
+
+        return new com.flowguard.core.application.port.in.SearchMessagesUseCase.SearchResult(
+                items, page, size, total, totalPages
+        );
+    }
+
+    @Override
+    public Optional<Instant> findOldestQueuedCreatedAt() {
+        String sql = """
+            SELECT MIN(created_at) FROM integration_message
+            WHERE status IN ('QUEUED', 'RETRY_SCHEDULED')
+            """;
+        Timestamp minCreated = jdbcTemplate.queryForObject(sql, new MapSqlParameterSource(), Timestamp.class);
+        return minCreated != null ? Optional.of(minCreated.toInstant()) : Optional.empty();
+    }
+
     private static class IntegrationMessageRowMapper implements RowMapper<IntegrationMessage> {
         @Override
         public IntegrationMessage mapRow(ResultSet rs, int rowNum) throws SQLException {

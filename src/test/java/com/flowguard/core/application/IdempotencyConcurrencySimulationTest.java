@@ -71,6 +71,20 @@ class IdempotencyConcurrencySimulationTest {
             public List<IntegrationMessage> findExpiredLeases(Instant cutoff, int batchSize) {
                 return Collections.emptyList();
             }
+
+            @Override
+            public com.flowguard.core.application.port.in.SearchMessagesUseCase.SearchResult search(
+                    com.flowguard.core.application.port.in.SearchMessagesUseCase.SearchCriteria criteria
+            ) {
+                return new com.flowguard.core.application.port.in.SearchMessagesUseCase.SearchResult(
+                        Collections.emptyList(), 0, 20, 0, 0
+                );
+            }
+
+            @Override
+            public Optional<Instant> findOldestQueuedCreatedAt() {
+                return Optional.empty();
+            }
         };
 
         IdempotencyRepositoryPort mockIdempRepo = new IdempotencyRepositoryPort() {

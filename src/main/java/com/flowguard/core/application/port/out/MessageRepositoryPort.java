@@ -26,5 +26,11 @@ public interface MessageRepositoryPort {
     void delete(MessageId id);
 
     List<IntegrationMessage> findExpiredLeases(Instant cutoff, int batchSize);
+
+    com.flowguard.core.application.port.in.SearchMessagesUseCase.SearchResult search(
+            com.flowguard.core.application.port.in.SearchMessagesUseCase.SearchCriteria criteria
+    );
+
+    Optional<Instant> findOldestQueuedCreatedAt();
 }
 

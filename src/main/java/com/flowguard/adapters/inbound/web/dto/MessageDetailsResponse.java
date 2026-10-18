@@ -1,10 +1,13 @@
 package com.flowguard.adapters.inbound.web.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flowguard.core.domain.model.IntegrationMessage;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public record MessageDetailsResponse(
         UUID messageId,
         String clientId,
@@ -22,11 +25,29 @@ public record MessageDetailsResponse(
         Instant createdAt,
         Instant updatedAt,
         Instant completedAt,
+        Object payload,
         Map<String, String> links
 ) {
     public static MessageDetailsResponse fromDomain(IntegrationMessage message) {
+        return fromDomain(message, false, null);
+    }
+
+    public static MessageDetailsResponse fromDomain(IntegrationMessage message, boolean includePayload, ObjectMapper objectMapper) {
         String selfLink = "/api/v1/messages/" + message.getId().value();
         String attemptsLink = "/api/v1/messages/" + message.getId().value() + "/attempts";
+
+        Object parsedPayload = null;
+        if (includePayload && message.getPayload() != null) {
+            if (objectMapper != null) {
+                try {
+                    parsedPayload = objectMapper.readValue(message.getPayload(), Object.class);
+                } catch (Exception e) {
+                    parsedPayload = message.getPayload();
+                }
+            } else {
+                parsedPayload = message.getPayload();
+            }
+        }
 
         return new MessageDetailsResponse(
                 message.getId().value(),
@@ -45,6 +66,7 @@ public record MessageDetailsResponse(
                 message.getCreatedAt(),
                 message.getUpdatedAt(),
                 message.getCompletedAt(),
+                parsedPayload,
                 Map.of("self", selfLink, "attempts", attemptsLink)
         );
     }
