@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: flowguard-postgres
+    environment:
+      POSTGRES_DB: flowguard
+      POSTGRES_USER: flowguard
+      POSTGRES_PASSWORD: flowguard_dev_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - flowguard-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowguard -d flowguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  flowguard-pgdata:
