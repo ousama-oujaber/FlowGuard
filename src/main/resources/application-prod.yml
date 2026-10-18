@@ -1,0 +1,37 @@
+# FlowGuard Production Profile Configuration
+spring:
+  datasource:
+    url: ${FLOWGUARD_DB_URL}
+    username: ${FLOWGUARD_DB_USERNAME}
+    password: ${FLOWGUARD_DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 5000
+      leak-detection-threshold: 30000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: never
+
+flowguard:
+  worker:
+    enabled: true
+    batch-size: 25
+    lease-duration-seconds: 60
+    poll-interval-ms: 1000
+  egress:
+    destinations:
+      LEDGER_MAIN:
+        target-url: ${FLOWGUARD_EGRESS_LEDGER_URL:https://ledger.internal.corp/api/v1/transactions}
+        connect-timeout: 5s
+        read-timeout: 10s
+      HR_WORKDAY:
+        target-url: ${FLOWGUARD_EGRESS_WORKDAY_URL:https://workday.internal.corp/payroll}
+        connect-timeout: 5s
+        read-timeout: 10s
